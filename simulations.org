@@ -1,0 +1,156 @@
+#+title XPCI Simulations for H-He demixing
+#+author: Carsten Fortmann-Grote, Juncheng E
+#+date: [2025-03-21 Fri] 
+
+#+property: header-args:python :session *xpci* :async yes :noweb yes :exports both :cache yes
+
+* Prerequisits
+:PROPERTIES:
+:ID:       663cda8a-165b-44d5-ace9-125c9618846f
+:END:
+** Imports
+:PROPERTIES:
+:ID:       a55ab8aa-bb3c-4cf4-a9a7-c8e965b0a159
+:END:
+#+name: imports
+#+begin_src python :exports code
+  import matplotlib.pyplot as plt
+  import numpy as np
+  import quantities as q
+  import syris
+  from syris.physics import propagate
+  from syris.bodies.simple import make_sphere
+  from syris.materials import make_henke
+  from syris.materials import Material
+  from syris.bodies.mesh import Mesh, make_cube
+#+end_src
+
+#+RESULTS: imports
+: None
+
+
+* Run the simple example from syris github homepage
+:PROPERTIES:
+:ID:       d7524133-36be-488f-b8c6-283720be77b7
+:END:
+#+name: syris-example
+#+begin_src python :results file link :file syris.pmma.sphere.png :var filename="syris.pmma.sphere.png" :cache no
+  syris.init()
+  energies = np.arange(10, 30) * q.keV
+  number_of_pixels = 1024
+  pixel_size = 0.4 * q.um
+  distance = 2 * q.m
+  material = make_henke('PMMA', energies)
+
+  sample = make_sphere(number_of_pixels, number_of_pixels / 4 * pixel_size, pixel_size, material=material)
+  image = propagate([sample], (number_of_pixels, number_of_pixels), energies, distance, pixel_size).get()
+  plt.imshow(image)
+  plt.savefig(filename)
+#+end_src
+
+#+RESULTS: syris-example
+[[file:syris.pmma.sphere.png]]
+
+
+
+* Now go play
+:PROPERTIES:
+:ID:       7a4c8b39-3082-44bd-93d7-a59eb23fe089
+:END:
+
+** Understand the materials interface: Create a sample with given optical properties
+:PROPERTIES:
+:ID:       603b788f-422c-46d9-bad8-731b46b1ea2a
+:END:
+
+*** Homogeneous ball of liquid HeH
+:PROPERTIES:
+:ID:       9ea1a689-4185-43e5-b0e4-1de81497e28c
+:END:
+#+name: materials
+#+begin_src python
+  energies = numpy.linspace(10.0, 15.0, 10) * q.keV
+
+  name = "HeH_homo"
+  delta = numpy.linspace(1.e-6, 1.e-8, 10)
+  delta = numpy.ones_like(energies) * 1.e-6
+  beta = numpy.ones_like(energies) * 0.0
+
+
+  epsilon = delta + beta * 1j
+
+  HeH_homo = Material(name=name,
+                      refractive_indices=epsilon, energies=energies)
+
+  HeH_homo_sphere = make_sphere(number_of_pixels, number_of_pixels/4*pixel_size, pixel_size, material=HeH_homo)
+#+end_src
+
+#+RESULTS: materials
+: None
+
+#+begin_src python :results file link :var filename="syris.HeH_homo.sphere.png" :file "syris.HeH_homo.sphere.png" :cache no
+  signal = propagate([HeH_homo_sphere], (number_of_pixels, number_of_pixels), energies, distance, pixel_size).get()
+
+  plt.imshow(signal)
+  plt.savefig(filename)
+#+end_src
+
+#+RESULTS:
+[[file:syris.HeH_homo.sphere.png]]
+
+*** Function to propagate through a given sample
+:PROPERTIES:
+:ID:       c2a8a888-dee9-4fe0-9440-32dd3cb724a6
+:END:
+#+name: syris.get_signal
+#+begin_src python :export code
+  def get_signal(samples, npx, npy, energies, distance, ps, imgfname):
+      signal = propagate(samples, (npx, npy), energies, distance, ps).get()
+
+      plt.imshow(signal)
+      plt.savefig(imgfname)
+
+      return imgfname
+#+end_src
+
+#+name: test_get_signal
+#+begin_src python :results value file
+   get_signal([HeH_homo_sphere], number_of_pixels, number_of_pixels, energies, distance, pixel_size, 'test.png')
+#+end_src
+
+#+RESULTS: test_get_signal
+[[file:test.png]]
+
+#+RESULTS: syris.get_signal
+: /tmp/babel-rZxzAI/python-f1RZjv
+
+*** Composite bodies
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an assigned refractive index.
+
+#+name: composite_cube
+#+begin_src python :results value file
+  delta_vals = [1e-3, 1e-6]
+  beta = 1e-10
+
+  materials = [Material(name='mat1',
+                        refractive_indices = numpy.ones_like(energies.magnitude) * delta_val + beta * 1j,
+                        energies = energies)
+               for delta_val in delta_vals]
+
+
+  mesh_1 = make_cube().magnitude * number_of_pixels/4 * pixel_size 
+
+
+  sample_1 = Mesh(mesh_1, trajectory=None, material=HeH_homo)
+
+
+  # get_signal([cube_1], number_of_pixels, number_of_pixels, energies, distance, 
+#+end_src
+
+#+RESULTS: composite_cube
+[[file:/tmp/babel-rZxzAI/python-Cr86vi]]
+
+
