@@ -2,17 +2,19 @@
 #+author: Carsten Fortmann-Grote, Juncheng E
 #+date: [2025-03-21 Fri] 
 #+property: header-args:python :session remote_py :dir /sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing :async yes
-#+property: header-args:shell :session remote_bash :dir /sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing :async yes
 
 * Preliminaries
 :PROPERTIES:
-:ID:       0701dfac-8354-4bc7-ac23-2add285d21c3
+:ID:       726e4058-e549-49e6-b654-8e9f39d6fed0
 :END:
+:PROPERTIES:
+:ID:       0701dfac-8354-4bc7-ac23-2add285d21c3
+#+header-args:python :session remote_py :dir /sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing :async yes
+#+header-args:shell :session remote_bash :dir /sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing :async yes:END:
 #+name: setenv
-#+begin_src bash
+#+begin_src bash :session remote_bash
   hostname
   pwd
-
   source ~/miniforge3/bin/activate xpcisim
 #+end_src
 
@@ -37,21 +39,29 @@
 :END:
 #+name: imports
 #+begin_src python :results output
-  import sys
+  from syris.bodies.base import CompositeBody
+  from syris.bodies.isosurfaces import MetaBall
+  from syris.bodies.mesh import Mesh, make_cube
+  from syris.bodies.simple import make_sphere
+  from syris.geometry import Trajectory
+  from syris.materials import Material
+  from syris.materials import make_fromfile
+  from syris.materials import make_henke
+  from syris.physics import propagate
+  import argparse
   import matplotlib.pyplot as plt
   import numpy; np=numpy
+  import os
   import quantities as q
+  import scipy.misc
   import syris
-  from syris.physics import propagate
-  from syris.bodies.simple import make_sphere
-  from syris.materials import make_henke
-  from syris.materials import Material
-  from syris.bodies.mesh import Mesh, make_cube
-
+  import syris.geometry as geom
+  import sys
   print("imports done")
 #+end_src
 
 #+RESULTS[bfbd2653789ec380db07fbb1091e9d012c76be6f]: imports
+: <string>:16: DeprecationWarning: scipy.misc is deprecated and will be removed in 2.0.0
 : imports done
 
 
@@ -78,7 +88,6 @@
 [[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/syris.pmma.sphere.png]]
 
 
-
 * Now go play
 :PROPERTIES:
 :ID:       7a4c8b39-3082-44bd-93d7-a59eb23fe089
@@ -95,10 +104,9 @@
 :END:
 #+name: materials
 #+begin_src python
-  energies = numpy.linspace(10.0, 15.0, 10) * q.keV
+  energies = numpy.linspace(10.0, 15.0, 64) * q.keV
 
   name = "HeH_homo"
-  delta = numpy.linspace(1.e-6, 1.e-8, 10)
   delta = numpy.ones_like(energies) * 1.e-6
   beta = numpy.ones_like(energies) * 0.0
 
@@ -113,17 +121,6 @@
 
 #+RESULTS[114226bf5d4187967f60814b5ba4c6afd965c9c5]: materials
 : None
-
-#+begin_src python :results file link :var filename="syris.HeH_homo.sphere.png" :file "syris.HeH_homo.sphere.png" :cache no
-  signal = propagate([HeH_homo_sphere], (number_of_pixels, number_of_pixels), energies, distance, pixel_size).get()
-
-  plt.imshow(signal)
-  plt.savefig(filename)
-#+end_src
-
-#+RESULTS:
-[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/syris.HeH_homo.sphere.png]]
-
 *** Function to propagate through a given sample
 :PROPERTIES:
 :ID:       c2a8a888-dee9-4fe0-9440-32dd3cb724a6
@@ -152,14 +149,45 @@
 [[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/test.png]]
 
 
-*** Composite bodies
+*** Cube
 :PROPERTIES:
 :ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
 :END:
 We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an assigned refractive index.
 
-#+name: composite_cube
+#+name: simple_cube
 #+begin_src python :results value file
+  # Get a cubic mesh.
+  mesh_1 = make_cube().magnitude * number_of_pixels/32 * pixel_size
+
+  # Dummy trajectory to keep the cube at its place.
+  tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+  # Assemble the sample, assign material properties.
+  sample_1 = Mesh(mesh_1, trajectory=tr, material=HeH_homo)
+
+  # Field of view
+  fov = number_of_pixels * pixel_size
+
+  # Translate to center of f.o.v.
+  translation = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+  sample_1.translate(translation)
+
+  # Get signal.
+  get_signal([sample_1], number_of_pixels, number_of_pixels, energies, distance, pixel_size, 'cube.png')
+#+end_src
+
+#+RESULTS: simple_cube
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/cube.png]]
+
+*** 4 Cubes
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an assigned refractive index.
+
+#+name: 4_cubes
+#+begin_src python :results value file link w/
   delta_vals = [1e-3, 1e-6]
   beta = 1e-10
 
@@ -169,24 +197,220 @@ We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an as
                for delta_val in delta_vals]
 
 
-  mesh_1 = make_cube().magnitude * number_of_pixels/4 * pixel_size 
+  fov = number_of_pixels * pixel_size
+  center = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+
+  samples = []
+  cube_dimension = number_of_pixels/32 * pixel_size
+  for i in range(4):
+      mesh = make_cube().magnitude * cube_dimension
+
+      tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+      sample = Mesh(mesh, trajectory=tr, material=HeH_homo)
+      # sample = Mesh(mesh, trajectory=tr, material=materials[0])
+
+      translation = center + ((i-2) * cube_dimension.magnitude, 0, 0)*q.um
+      sample.translate(translation)
+
+      samples.append(sample)
 
 
-  sample_1 = Mesh(mesh_1, trajectory=None, material=HeH_homo)
-
-
-  # get_signal([cube_1], number_of_pixels, number_of_pixels, energies, distance, 
+  get_signal(samples, number_of_pixels, number_of_pixels, energies, distance, pixel_size, '4cubes.png')
 #+end_src
 
-#+RESULTS: composite_cube
-[[file:/sshx:deepbio:/tmp/python-i1ckZg]]
+#+RESULTS: 4_cubes
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/4cubes.png]]
 
-*** Composite body example from syris documentation https://github.com/ufo-kit/syris/blob/9f409ef51cbf166cdcd43d328d28b8b30372b8ee/examples/composite_body.py
+*** 3 Cubes
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an assigned refractive index.
+
+#+name: 3_cubes
+#+begin_src python :results value file link w/
+  delta_vals = [1e-3, 1e-6]
+  beta = 1e-10
+
+  materials = [Material(name='mat1',
+                        refractive_indices = numpy.ones_like(energies.magnitude) * delta_val + beta * 1j,
+                        energies = energies)
+               for delta_val in delta_vals]
+
+
+  fov = number_of_pixels * pixel_size
+  center = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+
+  samples = []
+  cube_dimension = number_of_pixels/32 * pixel_size
+  for i in range(3):
+      mesh = make_cube().magnitude * cube_dimension
+
+      tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+      sample = Mesh(mesh, trajectory=tr, material=HeH_homo)
+      # sample = Mesh(mesh, trajectory=tr, material=materials[0])
+
+      translation = center + ((i-1) * cube_dimension.magnitude, 0, 0)*q.um
+      sample.translate(translation)
+
+      samples.append(sample)
+
+
+  get_signal(samples, number_of_pixels, number_of_pixels, energies, distance, pixel_size, '3cubes.png')
+#+end_src
+
+#+RESULTS: 3_cubes
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/3cubes.png]]
+
+*** 2 Cubes, same material
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+
+#+name: 2_cubes_same
+#+begin_src python :results value file link
+  delta_vals = [1e-6, 1e-6]
+  beta = 1e-10
+
+  materials = [Material(name='mat1',
+                        refractive_indices = numpy.ones_like(energies.magnitude) * delta_val + beta * 1j,
+                        energies = energies)
+               for delta_val in delta_vals]
+
+
+  fov = number_of_pixels * pixel_size
+  center = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+
+  samples = []
+  cube_dimension = number_of_pixels/32 * pixel_size
+  number_of_samples = 2
+  for i in range(2):
+      mesh = make_cube().magnitude * cube_dimension
+
+      tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+      material=materials[i % len(materials)]
+      sample = Mesh(mesh, trajectory=tr, material=material)
+
+      # translation = center + ((i-number_of_samples//2) * 2 * cube_dimension.magnitude, 0, 0)*q.um
+      translation = center + ((-1)**i * 1.0 * cube_dimension.magnitude, 0, 0)*q.um
+      print(sample, material, translation)
+      sample.translate(translation)
+
+      samples.append(sample)
+
+
+  get_signal(samples, number_of_pixels, number_of_pixels, energies, distance, pixel_size, '2cubes.png')
+#+end_src
+
+#+RESULTS: 2_cubes_same
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/2cubes.png]]
+
+*** 1 quader
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+
+#+name: quad
+#+begin_src python :results value file link
+  delta_vals = [1e-6, 1e-6]
+  beta = 1e-10
+
+  materials = [Material(name='mat1',
+                        refractive_indices = numpy.ones_like(energies.magnitude) * delta_val + beta * 1j,
+                        energies = energies)
+               for delta_val in delta_vals]
+
+
+  fov = number_of_pixels * pixel_size
+  center = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+
+  samples = []
+  cube_dimension = number_of_pixels/32 * pixel_size
+  number_of_samples = 1
+  stretch_array = numpy.array([[2,1,1]]*36).T
+  for i in range(number_of_samples):
+      mesh = make_cube().magnitude * stretch_array * cube_dimension
+
+      tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+      material=materials[i % len(materials)]
+      sample = Mesh(mesh, trajectory=tr, material=material)
+
+      # translation = center + ((i-number_of_samples//2) * 2 * cube_dimension.magnitude, 0, 0)*q.um
+      translation = center + ((-1)**i * 0.5 * cube_dimension.magnitude, 0, 0)*q.um
+      print(sample, material, translation)
+      sample.translate(translation)
+
+      samples.append(sample)
+
+
+  get_signal(samples, number_of_pixels, number_of_pixels, energies, distance, pixel_size, 'quad.png')
+#+end_src
+
+
+#+RESULTS: quad
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/quad.png]]
+
+Same as 2 cubes side by side
+
+*** 2 Cubes, different material
+:PROPERTIES:
+:ID:       6093d616-d47f-48b2-8dce-9935f05d01b8
+:END:
+
+#+name: 2_cubes_diff
+#+begin_src python :results value file link
+  delta_vals = [1e-5, 1e-6]
+  beta = 1e-10
+
+  materials = [Material(name='mat_{0:.3e}'.format(delta_val),
+                        refractive_indices = numpy.ones_like(energies.magnitude) * delta_val + beta * 1j,
+                        energies = energies)
+               for delta_val in delta_vals]
+
+
+  fov = number_of_pixels * pixel_size
+  center = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+
+  samples = []
+  cube_dimension = number_of_pixels/32 * pixel_size
+  number_of_samples = 2
+  for i in range(number_of_samples):
+      mesh = make_cube().magnitude * cube_dimension
+
+      tr = Trajectory((0,0)*pixel_size, velocity=0*q.um/q.s)
+
+      material=materials[i % len(materials)]
+      sample = Mesh(mesh, trajectory=tr, material=material)
+
+      translation = center + ((-1)**i * 1 * cube_dimension.magnitude, 0, 0)*q.um
+      print(sample, material, translation)
+      sample.translate(translation)
+
+      samples.append(sample)
+
+  get_signal(samples, number_of_pixels, number_of_pixels, energies, distance, pixel_size, '2cubes_diff.png')
+#+end_src
+
+#+RESULTS: 2_cubes_diff
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/2cubes_diff.png]]
+
+
+
+
+* Syris Examples
+:PROPERTIES:
+:ID:       c2ce59b8-8da0-4053-9f6f-53964e989c46
+:END:
+** Composite body example from syris documentation https://github.com/ufo-kit/syris/blob/9f409ef51cbf166cdcd43d328d28b8b30372b8ee/examples/composite_body.py
 :PROPERTIES:
 :ID:       adc2001b-c1f7-47b0-ac88-94f4b25e1772
 :END:
 
-#+begin_src python
+#+begin_src python :results value file link 
   from syris.bodies.base import CompositeBody
   from syris.bodies.isosurfaces import MetaBall
   from syris.bodies.mesh import make_cube, Mesh
@@ -198,7 +422,64 @@ We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an as
   import scipy.misc
   import syris
   import syris.geometry as geom
-  
+  import os
+  import argparse
+  import matplotlib.pyplot as plt
+  from syris.materials import make_fromfile
+
+
+
+  def get_default_parser(description):
+      """Default argument parser with *description*"""
+      return argparse.ArgumentParser(
+          description=description, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+      )
+
+
+  def show(image, title=""):
+      """Show *image* with *title* on its own figure."""
+      plt.figure()
+      image = plt.imshow(image)
+      plt.title(title)
+      plt.colorbar()
+      plt.show(block=False)
+
+      return image
+
+  def make_circle(n=128, axis="z", overall_angle=None, phase_shift=None):
+    """Axis specifies the axis of rotation, which can be 'x', 'y' or 'z'."""
+    if overall_angle is None:
+        overall_angle = 2 * np.pi * q.rad
+    if phase_shift is None:
+        phase_shift = 0 * q.rad
+    t = np.linspace(
+        phase_shift.rescale(q.rad).magnitude,
+        (phase_shift + overall_angle).rescale(q.rad).magnitude,
+        n,
+    )
+    a = np.cos(t)
+    b = np.sin(t)
+    c = np.zeros(n)
+
+    if axis == "z":
+        x = a
+        y = b
+        z = c
+    elif axis == "y":
+        x = a
+        z = b
+        y = c
+    elif axis == "x":
+        y = a
+        z = b
+        x = c
+
+    return list(zip(x, y, z)) * q.mm
+
+
+  def get_material(name):
+      """Load material from file *name*."""
+      return make_fromfile(os.path.join(os.path.dirname(__file__), "data", name))
   def show(image, title=""):
       """Show *image* with *title* on its own figure."""
       plt.figure()
@@ -471,8 +752,68 @@ We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an as
           else:
               im.set_data(p)
               plt.draw()
-      plt.show()
+      # plt.show()
+      fig_fname = "complex_trajectory.png"
+      plt.savefig(fig_fname)
+
+      return fig_fname
+
+      
+      
+  def main():
+      """ Main function """
+      from collections import namedtuple
+      Args = namedtuple("args", ['n', 'shape', 'ps', 't'])
+
+      args = Args(n=512, shape=(512, 512), ps=1*q.um, t=0)
+
+      syris.init(device_index=0)
+      fig_fname = make_complex_trajectory_sequence(args)
+
+      return fig_fname
+
+
+      
+  main()
 #+end_src
+
+#+RESULTS:
+[[file:/sshx:deepbio:/home/grotec/Repositories/XPCISims4HHeDemixing/complex_trajectory.png]]
+#+begin_src python 
+      # parser = get_default_parser(__doc__)
+      # subparsers = parser.add_subparsers(help="sub-command help", dest="sub-commands", required=False)
+      # manual = subparsers.add_parser("manual", help="Manual positioning via simple transformations")
+      # trajectory = subparsers.add_parser("trajectory", help="Automatic positioning via trajectories")
+      # subtrajectories = subparsers.add_parser(
+      #     "subtrajectories", help="Automatic positioning with " "local sub-body trajectories"
+      # )
+      # manual.set_defaults(_func=make_manual_sequence)
+      # trajectory.set_defaults(_func=make_trajectory_sequence)
+
+      # subtrajectories.add_argument(
+      #     "--t",
+      #     type=float,
+      #     help="Time at which to compute the projection normalized to "
+      #     "[0, 1], if not specified, complete sequence is shown",
+      # )
+      # subtrajectories.set_defaults(_func=make_complex_trajectory_sequence)
+
+      # args = parser.parse_args()
+
+      # # Set constants
+      # args.n = 512
+      # args.shape = (args.n, args.n)
+      # args.ps = 1 * q.um
+
+      # args._func(args)
+
+
+  # if __name__ == "__main__":
+      # main()
+#+end_src
+
+#+RESULTS:
+: /sshx:deepbio:/tmp/python-tJyiQ6
 
 #+begin_src python
   from collections import namedtuple
@@ -482,39 +823,181 @@ We'll setup a cube consisting of Nx * Ny * Nz subcubes. Each cube will get an as
   make_manual_sequence(args)
 #+end_src
 #+RESULTS:
-: None
+: /sshx:deepbio:/tmp/python-kfp41y
 
-  def main():
-      parser = get_default_parser(__doc__)
-      subparsers = parser.add_subparsers(help="sub-command help", dest="sub-commands", required=True)
-      manual = subparsers.add_parser("manual", help="Manual positioning via simple transformations")
-      trajectory = subparsers.add_parser("trajectory", help="Automatic positioning via trajectories")
-      subtrajectories = subparsers.add_parser(
-          "subtrajectories", help="Automatic positioning with " "local sub-body trajectories"
-      )
-      manual.set_defaults(_func=make_manual_sequence)
-      trajectory.set_defaults(_func=make_trajectory_sequence)
-
-      subtrajectories.add_argument(
-          "--t",
-          type=float,
-          help="Time at which to compute the projection normalized to "
-          "[0, 1], if not specified, complete sequence is shown",
-      )
-      subtrajectories.set_defaults(_func=make_complex_trajectory_sequence)
-
-      args = parser.parse_args()
-      syris.init(device_index=0)
-
-      # Set constants
-      args.n = 512
-      args.shape = (args.n, args.n)
-      args.ps = 1 * q.um
-
-      args._func(args)
-
-
-  if __name__ == "__main__":
-      main()
 #+end_src
 
+** Mesh example
+:PROPERTIES:
+:ID:       af72b6d5-f5de-4ee9-a01a-fae1418b7169
+:END:
+#+begin_src python
+    
+  # Copyright (C) 2013-2023 Karlsruhe Institute of Technology
+  #
+  # This file is part of syris.
+  #
+  # This library is free software: you can redistribute it and/or
+  # modify it under the terms of the GNU Lesser General Public
+  # License as published by the Free Software Foundation, either
+  # version 3 of the License, or (at your option) any later version.
+  #
+  # This library is distributed in the hope that it will be useful,
+  # but WITHOUT ANY WARRANTY; without even the implied warranty of
+  # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+  # Lesser General Public License for more details.
+  #
+  # You should have received a copy of the GNU Lesser General Public
+  # License along with this library. If not, see <http://www.gnu.org/licenses/>.
+
+  """Mesh projection and slice."""
+  import imageio
+  import logging
+  import time
+  import matplotlib.pyplot as plt
+  import numpy as np
+  import quantities as q
+  import syris
+  import syris.geometry as geom
+  import tqdm
+  from syris.bodies.mesh import Mesh, make_cube, read_blender_obj
+
+  from collections import namedtuple
+
+  LOG = logging.getLogger(__name__)
+
+
+  def main():
+      """Main function."""
+      args = parse_args()
+      syris.init(loglevel=logging.INFO, double_precision=args.double_precision)
+      units = q.Quantity(1, args.units)
+      triangles = make_cube().magnitude if args.input is None else read_blender_obj(args.input)
+      triangles = triangles * units
+      tr = geom.Trajectory([(0, 0, 0)] * units)
+      mesh = Mesh(triangles, tr, center=args.center, iterations=args.supersampling)
+      LOG.info("Number of triangles: {}".format(mesh.num_triangles))
+
+      shape = (args.n, args.n)
+      if args.pixel_size is None:
+          if args.input is None:
+              fov = 4.0 * units
+          else:
+              # Maximum sample size in x and y direction
+              max_diff = np.max(mesh.extrema[:-1, 1] - mesh.extrema[:-1, 0])
+              fov = max_diff
+          fov *= args.margin
+          args.pixel_size = fov / args.n
+      else:
+          fov = args.n * args.pixel_size
+
+      if args.translate is None:
+          translate = (fov.simplified.magnitude / 2.0, fov.simplified.magnitude / 2.0, 0) * q.m
+      else:
+          translate = (
+              args.translate[0].simplified.magnitude,
+              args.translate[1].simplified.magnitude,
+              0,
+          ) * q.m
+      LOG.info("Translation: {}".format(translate.rescale(q.um)))
+
+      mesh.translate(translate)
+      mesh.rotate(args.x_rotate, geom.X_AX)
+
+      fmt = "n: {}, pixel size: {}, FOV: {}"
+      LOG.info(fmt.format(args.n, args.pixel_size.rescale(q.um), fov.rescale(q.um)))
+      st = time.time()
+      for i in tqdm.tqdm(range(args.num_y_rotations)):
+          proj = mesh.project(shape, args.pixel_size, t=None).get()
+          if args.projection_filename is not None:
+              imageio.imwrite(args.projection_filename + f"_{i:>05}.tif", proj)
+          mesh.rotate(args.y_rotate, geom.Y_AX)
+
+      LOG.info("Duration: {} s".format(time.time() - st))
+      offset = (0, translate[1].simplified, -(fov / 2.0).simplified) * q.m
+
+      if args.compute_slice:
+          sl = mesh.compute_slices((1,) + shape, args.pixel_size, offset=offset).get()[0]
+          if args.slice_filename is not None:
+              imageio.imwrite(args.slice_filename, sl)
+          show(sl, title="Slice at y = {}".format(args.n / 2))
+
+      return proj
+      # show(proj, title="Projection")
+      # plt.show()
+
+
+  def parse_args():
+      """Parse command line arguments."""
+
+      # parser.add_argument("--input", type=str, help="Input .obj file")
+      # parser.add_argument("--units", type=str, default="um", help="Mesh physical units")
+      # parser.add_argument("--n", type=int, default=256, help="Number of pixels")
+      # parser.add_argument(
+      #     "--supersampling", type=int, default=1, help="Supersampling for mesh computation"
+      # )
+      # parser.add_argument("--pixel-size", type=float, help="Pixel size in um")
+      # parser.add_argument("--center", type=str, help="Mesh centering on creation")
+      # parser.add_argument("--translate", type=float, nargs=2, help="Translation as (x, y) in um")
+      # parser.add_argument("--x-rotate", type=float, default=0.0, help="Rotation around x axis [deg]")
+      # parser.add_argument("--y-rotate", type=float, default=0.0, help="Rotation around y axis [deg]")
+      # parser.add_argument(
+      #     "--num-y-rotations",
+      #     type=int,
+      #     default=1,
+      #     help="How many times rotate around y axis (tomography simulation)"
+      # )
+      # parser.add_argument(
+      #     "--margin", type=float, default=1.0, help="Margin in factor of the full FOV"
+      # )
+      # parser.add_argument(
+      #     "--projection-filename",
+      #     type=str,
+      #     help="Save projection to this filename prefix (.tif is appended)"
+      # )
+      # parser.add_argument("--compute-slice", action="store_true", help="Compute also one slice")
+      # parser.add_argument("--slice-filename", type=str, help="Save slice to this filename")
+      # parser.add_argument("--double-precision", action="store_true", help="Use double precision")
+      Args = namedtuple("args", ['input',
+                                 'units',
+                                 'n',
+                                 'supersampling',
+                                 'pixel_size',
+                                 'center',
+                                 'translate',
+                                 'x_rotate',
+                                 'y_rotate',
+                                 'num_y_rotations',
+                                 'margin',
+                                 'projection_filename',
+                                 'compute_slice',
+                                 'slice_filename',
+                                 'double_precision',
+                                 ]
+                        )
+
+      args = Args(input=None,
+                  units='um',
+                  n=256,
+                  supersampling=1,
+                  pixel_size=0.4*q.um,
+                  center='bbox',
+                  translate=(0,0)*q.um,
+                  x_rotate=0*q.deg,
+                  y_rotate=0*q.deg,
+                  num_y_rotations=1,
+                  margin=1.0,
+                  projection_filename='projection',
+                  compute_slice=False,
+                  slice_filename=None,
+                  double_precision=True
+                  )
+
+
+      return args
+
+  image = main()
+#+end_src
+
+#+RESULTS:
+: None
